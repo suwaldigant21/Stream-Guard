@@ -1,0 +1,69 @@
+networks:
+  streamguard-network:
+    driver: bridge
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.13
+    container_name: streamguard-redpanda
+    command:
+      - redpanda start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --mode dev-container
+      - --smp 1
+      - --set redpanda.auto_create_topics_enabled=true
+    ports:
+      - "19092:19092" # External Kafka API for local Python scripts
+      - "9644:9644"   # Admin API
+      - "8081:8081"   # Schema Registry
+    networks:
+      - streamguard-network
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:v3.10.0
+    container_name: streamguard-redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      REDPANDA_ADMIN_API_ENABLED: "true"
+      REDPANDA_ADMIN_API_URLS: http://redpanda:9644
+    ports:
+      - "8080:8080" # Web UI Console
+    networks:
+      - streamguard-network
+    depends_on:
+      - redpanda
+
+  # Local S3-compatible store: proves the S3 sink path ($0) before any real
+  # AWS is touched (SUGGESTIONS #2). No volume on purpose - `down` wipes it,
+  # mirroring the per-session terraform destroy workflow.
+  minio:
+    image: minio/minio:latest
+    container_name: streamguard-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - streamguard-network
+
+  # One-shot: creates the lakehouse bucket the consumer writes to.
+  minio-init:
+    image: minio/mc:latest
+    container_name: streamguard-minio-init
+    entrypoint: >
+      /bin/sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/streamguard-lakehouse"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - streamguard-network

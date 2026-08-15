@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: gold_transactions
+    description: >
+      Gold mart: 9 engineered features + fraud label, CTAS into the gold S3
+      bucket, sized for the Phase 5 XGBoost training split.
+    columns:
+      - name: type
+        tests:
+          - not_null
+      - name: amount
+        tests:
+          - not_null
+      - name: is_fraud
+        tests:
+          - not_null

@@ -1,0 +1,25 @@
+name: streamguard
+version: 1.0.0
+config-version: 2
+
+profile: streamguard
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  streamguard:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
+      +external_location: "s3://streamguard-gold-83db02e0/marts/"
+      +partitioned_by: ["type"]

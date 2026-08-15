@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: streamguard_db
+    database: AwsDataCatalog
+    schema: streamguard_db
+    tables:
+      - name: bronze_transactions
+        description: >
+          External table registered manually in Athena (2026-08-15) over
+          s3://streamguard-lakehouse-83db02e0/transactions/ — the synced clean
+          Bronze lakehouse, partitioned by type, SNAPPY-compressed.
+        loaded_at_field: ingested_at
+      - name: gdpr_requests
+        description: >
+          Append-only GDPR erasure registry (P1-2): raw account_id + its
+          deterministic salted-HMAC alias per erasure request, over
+          s3://streamguard-lakehouse-83db02e0/gdpr_requests/. Seeded by
+          scripts/seed_gdpr_requests.py. stg_transactions LEFT JOINs it and
+          projects the alias (never the raw id) so erased accounts are masked
+          at query time — no Bronze rewrite, no DELETE (CTAS tables cannot
+          UPDATE).
+        loaded_at_field: requested_at

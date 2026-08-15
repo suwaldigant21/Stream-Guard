@@ -1,0 +1,9 @@
+# OPTIONAL — every variable has a default, so `terraform init && terraform
+# apply` works with no tfvars file at all.
+#
+# S3 bucket names are made globally unique automatically via a random suffix
+# (see main.tf: random_id.bucket_suffix), so there is nothing to fill in here.
+
+project     = "streamguard"
+environment = "dev"
+region      = "us-east-1"

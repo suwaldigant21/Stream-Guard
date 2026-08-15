@@ -1,0 +1,14 @@
+streamguard:
+  target: dev
+  outputs:
+    dev:
+      type: athena
+      region_name: us-east-1
+      database: AwsDataCatalog
+      schema: streamguard_db
+      s3_staging_dir: s3://streamguard-athena-results-83db02e0/dbt_staging/
+      s3_data_dir: s3://streamguard-lakehouse-83db02e0/dbt_data/
+      s3_data_naming: schema_table
+      work_group: streamguard-dev
+      threads: 2
+      num_retries: 3

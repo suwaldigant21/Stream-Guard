@@ -1,0 +1,38 @@
+[project]
+name = "stream-guard"
+version = "0.1.0"
+description = "Real-time-style fraud detection pipeline on PaySim: FastAPI mock feed -> Redpanda -> PySpark -> S3 Bronze -> dbt -> XGBoost, with a verifiable GDPR Article 17 erasure endpoint."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "awswrangler>=3.17.1",
+    "boto3>=1.36.0",
+    "dbt-athena-community>=1.11.0",
+    "fastapi>=0.141.1",
+    "kafka-python>=3.0.10",
+    "matplotlib>=3.11.1",
+    "pandas>=3.0.5",
+    "pyarrow>=25.0.1",
+    "pyspark>=4.2.0",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+    "scikit-learn>=1.9.0",
+    "seaborn>=0.13.2",
+    "uvicorn>=0.52.1",
+    "xgboost>=3.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.10.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.2",
+    "watchfiles>=1.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100

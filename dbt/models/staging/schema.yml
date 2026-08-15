@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: >
+      Silver view over the Bronze lakehouse (source bronze_transactions):
+      snake_case columns plus balance-transition features. Account identifiers
+      are masked (P1-2): an erased account in the gdpr_requests registry is
+      projected as its salted-HMAC alias instead of the raw id at query time;
+      the raw id is dropped entirely in the Gold mart.
+    columns:
+      - name: type
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
+      - name: amount
+        tests:
+          - not_null
+      - name: is_fraud
+        tests:
+          - not_null
+      - name: ingested_at
+        tests:
+          - not_null
