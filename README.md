@@ -80,7 +80,7 @@ afterthoughts.
  FEED                  STREAMING                    BRONZE                SILVER / GOLD               ML / OBSERVABILITY
 ┌────────────┐   ┌─────────────────────┐   ┌────────────────────┐  ┌───────────────────────┐  ┌────────────────────────┐
 │ FastAPI    │   │ Redpanda (Docker)    │   │ S3 Bronze parquet   │  │ AWS Glue Data Catalog │  │ XGBoost fraud model     │
-│ mock vendor│──▶│  transactions topic  │──▶│ partitioned by type │─▶│ Athena + dbt Core      │─▶│ (Gold feature store)    │
+│ mock vendor│──▶│transactions-raw topic│──▶│ partitioned by type │─▶│ Athena + dbt Core      │─▶│ (Gold feature store)    │
 │ feed (:8000)│  │ producer.py replay   │   │ + DQ quarantine     │  │ stg → gold CTAS        │  │                         │
 └────────────┘   └─────────────────────┘   └────────────────────┘  └───────────────────────┘  │ FastAPI scoring :8001   │
                         │                                                                      │  POST /v1/predict        │
@@ -92,7 +92,7 @@ afterthoughts.
 ```
 
 **Data flow in one sentence:** a FastAPI mock feed replays the PaySim dataset
-into a Redpanda `transactions` topic; a PySpark Structured Streaming job
+into a Redpanda `transactions-raw` topic; a PySpark Structured Streaming job
 consumes it, validates each row against a data-quality gate (rejecting to a
 `transactions_dq_rejected` quarantine), and writes partitioned Bronze parquet;
 dbt + Athena build Silver and Gold (window aggregates + GDPR masking); an
@@ -240,12 +240,12 @@ fraud sits in only two of the five transaction types.
 ## 7. Streaming Ingestion — Redpanda + PySpark
 
 > 📸 **Screenshot placement:** the Redpanda Console (`localhost:8080`) showing
-> the `transactions`, `fraud-alerts`, `gdpr-deletion-requests`, and
+> the `transactions-raw`, `fraud-alerts`, `gdpr-deletion-requests`, and
 > `transactions_dq_rejected` topics with live message counts →
 > `docs/redpanda_console_topics.png`, right after this heading.
 
 - **Producer** (`producer.py`): replays the PaySim CSV into the
-  `transactions` topic. A **persisted watermark** (`producer_state.json`) plus
+  `transactions-raw` topic. A **persisted watermark** (`producer_state.json`) plus
   `maxOffsetsPerTrigger` make restart idempotent — this fixed a real incident
   where a restart from offset 0 created **~532K duplicate Bronze rows** (§13.5).
 - **Consumer** (`pyspark_consumer.py`): PySpark Structured Streaming with a
