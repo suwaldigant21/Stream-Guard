@@ -1,9 +1,10 @@
 # Stream Guard — Real-Time Fraud Detection Pipeline (PaySim)
 
 An end-to-end fraud-detection pipeline that takes a modeling approach
-**validated on a 24K-row academic sample, scales it to the full 6.3M-row
-PaySim dataset**, and serves it as a genuinely real-time scoring system:
-a FastAPI vendor feed streams synthetic payments into Redpanda, PySpark
+**validated on a 24K-row academic sample** (BSc Machine Learning coursework,
+R/caret — 5-fold CV, ROSE balancing, Random Forest at 0.9275 AUC), **scales it
+to the full 6.3M-row PaySim dataset**, and serves it as a genuinely real-time
+scoring system: a FastAPI vendor feed streams synthetic payments into Redpanda, PySpark
 Structured Streaming lands them in a partitioned Bronze lakehouse on S3, dbt
 builds Silver/Gold on Athena, an XGBoost model is trained on the Gold feature
 store, and a second streaming consumer scores every event in flight, emits
@@ -69,9 +70,11 @@ afterthoughts.
 
 ## 2. Architecture
 
-> 📸 **Screenshot placement:** the live CloudWatch dashboard panels — workload,
-> heartbeat, and alarm status — are referenced in §10. The ASCII diagram below
-> is accurate and can stand alone.
+> 📸 **Diagram placement:** the draw.io architecture diagram lives at
+> [`docs/architecture-diagram.png`](docs/architecture-diagram.png) and should be
+> shown here, before the ASCII version below (the ASCII diagram is accurate and
+> can stand alone if the image is ever missing). The live CloudWatch dashboard
+> panels — workload, heartbeat, and alarm status — are referenced in §10.
 
 ```
  FEED                  STREAMING                    BRONZE                SILVER / GOLD               ML / OBSERVABILITY
@@ -187,6 +190,31 @@ repo contains the code, tests, and Terraform that reproduce them.
 
 ## 6. The Data
 
+### 6.1 Where this started — validated on a 24K-row academic sample first
+
+Before any of the infrastructure below existed, the modeling approach was
+proven on a 24,192-row PaySim subset as university coursework (BSc Machine
+Learning, R/caret): full EDA, mode/median imputation, IQR-based outlier
+retention (kept as fraud signal, not removed), ROSE balancing on the training
+fold only, and five models compared under 5-fold CV. Two findings from that
+project carried forward directly into StreamGuard's production design:
+
+- **Fraud only occurs in `TRANSFER` and `CASH_OUT` transaction types** — this
+  is exactly why the Gold training subset here is filtered to those two types
+  (§9), not a fresh discovery re-derived from scratch.
+- **PCA showed heavy class overlap** — an early signal that a simple decision
+  boundary wouldn't separate fraud cleanly, which is part of why the eventual
+  threshold here is *derived* from the PR curve rather than assumed (§9, §13.2).
+
+The best R model (Random Forest, mtry=4, ntree=500) reached **0.9275 AUC** on
+the 24K balanced-ish sample (34% fraud). StreamGuard scales the same underlying
+problem to the full, genuinely hard version: **6.3M rows at ~0.13% fraud** —
+the coursework proved the modeling fundamentals; this project proves they hold
+up under real class imbalance and real streaming ingestion, not just a
+classroom-sized CSV.
+
+### 6.2 The production dataset
+
 **PaySim** simulates a mobile-money service: a user-to-user P2P transfer network
 with both genuine and fraudulently-initiated transactions. It is the standard
 academic benchmark for transaction fraud detection, with a real catch: all
@@ -210,6 +238,11 @@ fraud sits in only two of the five transaction types.
 ---
 
 ## 7. Streaming Ingestion — Redpanda + PySpark
+
+> 📸 **Screenshot placement:** the Redpanda Console (`localhost:8080`) showing
+> the `transactions`, `fraud-alerts`, `gdpr-deletion-requests`, and
+> `transactions_dq_rejected` topics with live message counts →
+> `docs/redpanda_console_topics.png`, right after this heading.
 
 - **Producer** (`producer.py`): replays the PaySim CSV into the
   `transactions` topic. A **persisted watermark** (`producer_state.json`) plus
@@ -239,6 +272,10 @@ fraud sits in only two of the five transaction types.
 ---
 
 ## 8. Bronze → Gold — Terraform + Athena + dbt
+
+> 📸 **Screenshot placement:** terminal output of `dbt run` + `dbt test`
+> showing `PASS=2` models / `PASS=8` tests → `docs/dbt_run_test_output.png`,
+> right after this heading.
 
 Terraform provisions the lakehouse: AES-256-encrypted, public-access-blocked S3
 buckets with a policy denying non-TLS requests, Glue Data Catalog, an Athena
@@ -343,14 +380,23 @@ restart → OK).
 
 ## 11. GDPR Article 17 — Right to Erasure
 
+> 📸 **Screenshot placement:** terminal output of the `POST /v1/gdpr/erasure`
+> request/response (202 + alias + `streaming_purge_published: true`) alongside
+> the consumer log line `[GDPR] Purged … from streaming fan-in state.` →
+> `docs/gdpr_erasure_verification.png`, right after this heading — this is one
+> of the strongest verifiable moments in the whole project, worth a real
+> screenshot rather than just the summary table in §12.
+
 The pipeline implements **Article 17 (Right to Erasure)** via a verifiable
 cascading-delete path — deliberately worded as "implements Article 17", never
 "GDPR-compliant", because a deployed compliance claim is not the deliverable
-here. Two enforcement layers, both tested on AWS:
+here. A `POST /v1/gdpr/erasure` endpoint (`src/api/gdpr.py`, part of the
+scoring service) accepts `{account_id, request_id}`, validates the PaySim
+account-id format, and drives two enforcement layers, both tested on AWS:
 
-1. **Streaming purge** (`src/gdpr.py` + `src/consumer/main.py`): a
-   `gdpr-deletion-requests` topic carries erasure requests; the live consumer
-   reads them and drops matching events in flight.
+1. **Streaming purge** (`src/api/gdpr.py` + `src/consumer/main.py`): the endpoint
+   publishes to a `gdpr-deletion-requests` topic; the live consumer reads it
+   and drops matching events in flight.
 2. **Lakehouse masking + append-only registry** (`scripts/anonymize_batch_gdpr.py`
    + `scripts/seed_gdpr_requests.py`): an erasure request appends an immutable
    row to `gdpr_requests` (Athena), and the dbt Silver layer LEFT-JOINs it so
@@ -530,3 +576,18 @@ uv run pytest -q && uv run ruff check .
 - Formal CI: pytest + `dbt test` gating every pull request.
 - Datadog/richer dashboards only if streaming moves to AWS (deliberately
   deferred — CloudWatch + SNS already meets the alerting goal).
+
+## Known Limitations & Planned V2
+
+- **State store**: current fan-in tracking uses in-memory state, reset on
+  consumer restart. Production version would use Spark's `mapGroupsWithState`
+  for durable, checkpointed state.
+- **GDPR erasure**: current implementation masks PII at the Silver query
+  layer (view-based); a stronger implementation would migrate Bronze to
+  Apache Iceberg for genuine physical row deletion, not just downstream masking.
+- **Threshold selection**: current threshold is derived from max-F1 on the
+  PR curve; a production system would use an asymmetric cost matrix
+  (cost of false negative vs. false positive) rather than treating both
+  error types as equally weighted.
+
+PRs welcome if anyone wants to take a swing at any of these.
