@@ -40,7 +40,7 @@ pipeline output, not estimated.
 14. [Security & Cost Notes](#14-security--cost-notes)
 15. [How to Reproduce](#15-how-to-reproduce)
 16. [Roadmap](#16-roadmap)
-
+17. [Known Limitations & Planned V2](#17-Known--Limitations--&--Planned--V2)
 ---
 
 ## 1. The Problem
@@ -70,11 +70,9 @@ afterthoughts.
 
 ## 2. Architecture
 
-> 📸 **Diagram placement:** the draw.io architecture diagram lives at
-> [`docs/architecture-diagram.png`](docs/architecture-diagram.png) and should be
-> shown here, before the ASCII version below (the ASCII diagram is accurate and
-> can stand alone if the image is ever missing). The live CloudWatch dashboard
-> panels — workload, heartbeat, and alarm status — are referenced in §10.
+<br>
+<img width="1693" height="929" alt="architecture-diagram" src="https://github.com/user-attachments/assets/74e84cfb-4ab2-45f4-b6c3-95b5193374b9" />
+<br>
 
 ```
  FEED                  STREAMING                    BRONZE                SILVER / GOLD               ML / OBSERVABILITY
@@ -109,11 +107,11 @@ and raising SNS alerts — with a parallel GDPR erasure topic.
   disappearances of Bronze data from S3** using full AWS forensics
   (EventBridge, Lambda, CloudTrail, IAM) that traced the deletion to
   dbt-athena's relation-replacement semantics, not external actors — and
-  redesigned the layer boundaries so it cannot happen again (§13.1).
+  redesigned the layer boundaries so it cannot happen again (Section 13.1).
 - **Model:** PR-AUC **0.8550**, ROC-AUC **0.9956** on 8,213 fraud / 2.77M
   transactions; tuned operating point cuts false positives from **30,545 to
   77** at 73.3% recall — and the threshold is *derived*, never hardcoded
-  (§9, §13.2).
+  (Section 9, Section 13.2).
 - **Real-time:** 6.3M transactions streamed through Redpanda → PySpark →
   Bronze with **0 duplicates** after rebuild; a 5,000-score live alert test
   produced **4,999/5,000 correct alerts** through the real scoring service.
@@ -178,7 +176,7 @@ stream-guard/
 │   └── setup_sns_subscription.ps1 · teardown.ps1
 ├── terraform/                        # S3, Glue, Athena, IAM, CloudWatch, SNS, dashboard
 ├── tests/                            # 66 tests across feed, streaming, DQ, API, GDPR, dbt, training
-├── docs/                             # dashboard screenshots (see §10)
+├── docs/                             # dashboard screenshots (see Section 10)
 └── data/  (gitignored)               # bronze parquet, checkpoints, model artifacts, gold extracts
 ```
 
@@ -201,10 +199,10 @@ project carried forward directly into StreamGuard's production design:
 
 - **Fraud only occurs in `TRANSFER` and `CASH_OUT` transaction types** — this
   is exactly why the Gold training subset here is filtered to those two types
-  (§9), not a fresh discovery re-derived from scratch.
+  (Section 9), not a fresh discovery re-derived from scratch.
 - **PCA showed heavy class overlap** — an early signal that a simple decision
   boundary wouldn't separate fraud cleanly, which is part of why the eventual
-  threshold here is *derived* from the PR curve rather than assumed (§9, §13.2).
+  threshold here is *derived* from the PR curve rather than assumed (Section 9, Section 13.2).
 
 The best R model (Random Forest, mtry=4, ntree=500) reached **0.9275 AUC** on
 the 24K balanced-ish sample (34% fraud). StreamGuard scales the same underlying
@@ -230,24 +228,23 @@ fraud sits in only two of the five transaction types.
     **quarantined, not silently dropped** — so the data-quality gate forks them
     to a `transactions_dq_rejected` topic with a visible reason code.
   - Fraud is **time-concentrated**: the late 20% of the dataset holds 52% of
-    all fraud, which is why the split is temporal, not random (§9).
+    all fraud, which is why the split is temporal, not random (Section 9).
   - PaySim's account identifiers are 10-digit strings — trivially guessable,
-    which is exactly why erasure aliasing (§11) uses a keyed HMAC rather than
+    which is exactly why erasure aliasing (Section 11) uses a keyed HMAC rather than
     a reversible hash.
 
 ---
 
 ## 7. Streaming Ingestion — Redpanda + PySpark
-
-> 📸 **Screenshot placement:** the Redpanda Console (`localhost:8080`) showing
-> the `transactions-raw`, `fraud-alerts`, `gdpr-deletion-requests`, and
-> `transactions_dq_rejected` topics with live message counts →
-> `docs/redpanda_console_topics.png`, right after this heading.
+<img width="2559" height="1345" alt="Screenshot 2026-08-16 083827" src="https://github.com/user-attachments/assets/e80b9c5d-6b09-43b5-b1eb-58a22b5a891e" />
+<br>
+<img width="1269" height="405" alt="Screenshot 2026-08-16 084553" src="https://github.com/user-attachments/assets/2f3ace07-fb4d-42ad-9b94-1d1c02ad8e5b" />
+<br>
 
 - **Producer** (`producer.py`): replays the PaySim CSV into the
   `transactions-raw` topic. A **persisted watermark** (`producer_state.json`) plus
   `maxOffsetsPerTrigger` make restart idempotent — this fixed a real incident
-  where a restart from offset 0 created **~532K duplicate Bronze rows** (§13.5).
+  where a restart from offset 0 created **~532K duplicate Bronze rows** (Section 13.5).
 - **Consumer** (`pyspark_consumer.py`): PySpark Structured Streaming with a
   30 s processing trigger, so each partition lands as ~450–520 rows of parquet
   instead of hundreds of tiny files (S3 PUT/LIST cost + Athena metadata scan).
@@ -265,17 +262,16 @@ fraud sits in only two of the five transaction types.
   (running totals would double-count at Sum/300 s).
 
 > **Design note:** Bronze, Silver, and Gold live in **disjoint S3 namespaces** —
-> a direct consequence of the ghost-deletion incident (§13.1). A medallion
+> a direct consequence of the ghost-deletion incident (Section 13.1). A medallion
 > architecture where the warehouse tool can drop the layer above it is a
 > waiting data-loss bug.
 
 ---
 
 ## 8. Bronze → Gold — Terraform + Athena + dbt
+<img width="1613" height="524" alt="Screenshot 2026-08-16 084150" src="https://github.com/user-attachments/assets/e3bd89e4-8229-4eae-8ad6-0f3539df6968" /><br>
+<img width="1652" height="937" alt="Screenshot 2026-08-16 084202" src="https://github.com/user-attachments/assets/89b69ea2-7bd1-482d-9a1f-2b9af45ceae2" />
 
-> 📸 **Screenshot placement:** terminal output of `dbt run` + `dbt test`
-> showing `PASS=2` models / `PASS=8` tests → `docs/dbt_run_test_output.png`,
-> right after this heading.
 
 Terraform provisions the lakehouse: AES-256-encrypted, public-access-blocked S3
 buckets with a policy denying non-TLS requests, Glue Data Catalog, an Athena
@@ -284,7 +280,7 @@ goes to `s3_data_dir`, not the results dir), least-privilege IAM, CloudWatch
 alarms, SNS, and the dashboard.
 
 - **Bronze** is a **source**, never a dbt model — dbt output is isolated under
-  `dbt_data/`. This boundary is the fix for the S3 deletion bug (§13.1).
+  `dbt_data/`. This boundary is the fix for the S3 deletion bug (Section 13.1).
 - **Silver** (`stg_transactions.sql`): reads Bronze via the catalog, computes
   the past-only **24-step window aggregates** (`RANGE` frames partitioned by
   originator/destination — `velocity_orig_*`, `fan_in_dest_count_24h`), applies
@@ -300,13 +296,17 @@ alarms, SNS, and the dashboard.
 > leaving the 11-column final Gold. One identifier feature survived —
 > `fan_in_dest_count_24h` — and it is the reason Phase 7 scoring is stateful.
 
+<br>
+<img width="2559" height="1291" alt="Screenshot 2026-08-15 123137" src="https://github.com/user-attachments/assets/4e361ec5-d415-42f5-ae8d-5152de909636" /><br>
+<img width="2559" height="1290" alt="Screenshot 2026-08-15 123313" src="https://github.com/user-attachments/assets/cc8e3ae2-98fe-46e8-b521-2cbc8243702e" />
+
 ---
 
 ## 9. The Model — XGBoost
 
 `train/` extracts the fraud-bearing subset (`CASH_OUT` + `TRANSFER`,
 **2,770,409 rows, 8,213 fraud**) from the Gold feature store and trains in
-stages, each stage catching a real bug (§13.2):
+stages, each stage catching a real bug (Section13.2):
 
 1. **Temporal split** at the 80th percentile of `step`: train 2,217,905 / test
    552,504. The test window holds 4,258 of the 8,213 frauds — a random split
@@ -363,11 +363,12 @@ totals), and `ConsumerHeartbeat` as a **dead-man's switch** with
 `treat_missing_data = "breaching"`. Alerting was verified live end-to-end: a
 5,000-score burst of pre-verified real fraud rows through the real API produced
 **4,999/5,000 alerts**.
+<br><br>
+<img width="600" height="400" alt="dashboard-alarm-status" src="https://github.com/user-attachments/assets/85dc7dfb-a5af-455e-99eb-8bb04e255301" /><br>
+<img width="600" height="400" alt="dashboard-heartbeat" src="https://github.com/user-attachments/assets/e97cbfa9-3a34-4e36-bd32-db6bd1d6e6ec" /><br>
+<img width="600" height="400" alt="dashboard-workload" src="https://github.com/user-attachments/assets/d8936d53-1c56-4bef-9144-5aa63b2a1f37" /><br>
 
-> 📸 **Screenshot placement** — `docs/dashboard-workload.png` (scored
-> transactions + fraud alerts + scorer errors), `docs/dashboard-heartbeat.png`
-> (consumer liveness), and `docs/dashboard-alarm-status.png` (alarm state
-> panel) → right after this section.
+
 
 Two CloudWatch behaviors are documented here because they surprised us (§13.6):
 a fresh metric backfills 3 pre-data periods as *missing*, briefly flaring a
@@ -375,17 +376,21 @@ false ALARM (self-heals on the first datapoint — ship a startup heartbeat), an
 the alarm evaluates a range larger than `evaluation_periods`, so real death
 detection was ~10 min, not 3 (verified live: death 12:28 → ALARM 12:38 →
 restart → OK).
+<br>
+<img width="2126" height="485" alt="Screenshot 2026-08-16 084844" src="https://github.com/user-attachments/assets/29cff1ee-200c-426e-b480-cb2b9ddf542f" />
+
+<img width="2074" height="1215" alt="Screenshot 2026-08-15 170958" src="https://github.com/user-attachments/assets/ff2dfd28-4c20-429a-93da-97d7b423a911" /><br>
+<img width="2077" height="1224" alt="Screenshot 2026-08-15 172327" src="https://github.com/user-attachments/assets/74b3ae11-83bc-4cf1-a805-bbb5aca5b2e7" /><br>
+<img width="2081" height="1217" alt="Screenshot 2026-08-15 181042" src="https://github.com/user-attachments/assets/e6c06c56-a5b1-40a9-b8ab-96fe3a61a85f" /><br>
+
 
 ---
 
 ## 11. GDPR Article 17 — Right to Erasure
+<br>
+<img width="839" height="261" alt="Screenshot 2026-08-16 084532" src="https://github.com/user-attachments/assets/760feccb-1482-43d8-b73a-19617b342af1" /><br>
+<img width="913" height="294" alt="Screenshot 2026-08-16 084520" src="https://github.com/user-attachments/assets/fd3c29a6-ba42-460d-b31b-86771a207bfc" /><br>
 
-> 📸 **Screenshot placement:** terminal output of the `POST /v1/gdpr/erasure`
-> request/response (202 + alias + `streaming_purge_published: true`) alongside
-> the consumer log line `[GDPR] Purged … from streaming fan-in state.` →
-> `docs/gdpr_erasure_verification.png`, right after this heading — this is one
-> of the strongest verifiable moments in the whole project, worth a real
-> screenshot rather than just the summary table in §12.
 
 The pipeline implements **Article 17 (Right to Erasure)** via a verifiable
 cascading-delete path — deliberately worded as "implements Article 17", never
@@ -570,14 +575,14 @@ uv run pytest -q && uv run ruff check .
 
 ## 16. Roadmap
 
-- Move the GDPR aliasing pepper to AWS Secrets Manager (closes the §14 known gap).
+- Move the GDPR aliasing pepper to AWS Secrets Manager (closes the Section 14 known gap).
 - Add Iceberg table versioning to Bronze so raw-layer erasure is an `UPDATE`
   over history rather than a documented retention carve-out.
 - Formal CI: pytest + `dbt test` gating every pull request.
 - Datadog/richer dashboards only if streaming moves to AWS (deliberately
   deferred — CloudWatch + SNS already meets the alerting goal).
 
-## Known Limitations & Planned V2
+## 17. Known Limitations & Planned V2
 
 - **State store**: current fan-in tracking uses in-memory state, reset on
   consumer restart. Production version would use Spark's `mapGroupsWithState`
